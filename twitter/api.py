@@ -1,3 +1,4 @@
+import logging
 try:
     import urllib.request as urllib_request
     import urllib.error as urllib_error
@@ -7,6 +8,8 @@ except ImportError:
 
 from twitter.twitter_globals import POST_ACTIONS
 from twitter.auth import NoAuth
+from google.appengine.api import urlfetch
+from google.appengine.api.urlfetch_errors import DeadlineExceededError
 
 import re
 
@@ -163,23 +166,19 @@ class TwitterCall(object):
             else:
                 body = arg_data.encode('utf8')
 
-        req = urllib_request.Request(uriBase, body, headers)
-        return self._handle_response(req, uri, arg_data)
+        #req = urllib_request.Request(uriBase, body, headers)
+        return self._handle_response(uriBase, headers, body , arg_data, method=method)
 
-    def _handle_response(self, req, uri, arg_data):
-        try:
-            handle = urllib_request.urlopen(req)
-            if "json" == self.format:
-                res = json.loads(handle.read().decode('utf8'))
-                return wrap_response(res, handle.headers)
-            else:
-                return wrap_response(
-                    handle.read().decode('utf8'), handle.headers)
-        except urllib_error.HTTPError as e:
-            if (e.code == 304):
-                return []
-            else:
-                raise TwitterHTTPError(e, uri, self.format, arg_data)
+    def _handle_response(self, url, headers, body, arg_data, method="GET"):
+        response = urlfetch.fetch( url, headers=headers, method=method, payload=body )
+        if response.status_code in [400,401, 404]:
+            raise TwitterError("Bad response(%s) from %s \n%s", response.status_code, url, response.content)
+        if "json" == self.format:
+            res = json.loads(response.content)
+            return wrap_response(res, response.headers)
+        else:
+            return wrap_response(
+                response.content, response.headers)
 
 class Twitter(TwitterCall):
     """

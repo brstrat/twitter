@@ -1,3 +1,4 @@
+from twitter.api import TwitterHTTPError
 try:
     import urllib.request as urllib_request
     import urllib.error as urllib_error
@@ -6,7 +7,7 @@ except ImportError:
     import urllib2 as urllib_request
     import urllib2 as urllib_error
 import json
-from ssl import SSLError
+#from ssl import SSLError
 
 from .api import TwitterCall, wrap_response
 
@@ -35,12 +36,12 @@ class TwitterJSONIter(object):
                 else:
                     yield None
             except urllib_error.HTTPError as e:
-                raise TwitterHTTPError(e, uri, self.format, arg_data)
+                raise TwitterHTTPError(e, 'uri', self.format, 'arg_data')
             # this is a non-blocking read (ie, it will return if any data is available)
             try:
                 self.buf += sock.recv(1024)
-            except SSLError as e:
-                if (not self.block) and (e.errno == 2):
+            except Exception as e:
+                if (not self.block) and (getattr(e,'errno', -1) == 2):
                     # Apparently this means there was nothing in the socket buf
                     pass
                 else:
