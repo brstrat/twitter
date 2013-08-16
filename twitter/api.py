@@ -20,9 +20,12 @@ import re
 import gzip
 
 try:
-    import json
+    import http.client as http_client
 except ImportError:
-    import simplejson as json
+    import httplib as http_client
+
+import json
+
 
 class _DEFAULT(object):
     pass
@@ -44,12 +47,18 @@ class TwitterHTTPError(TwitterError):
         self.uri = uri
         self.format = format
         self.uriparts = uriparts
-        if self.e.headers['Content-Encoding'] == 'gzip':
-            buf = StringIO(self.e.fp.read())
+        try:
+            data = self.e.fp.read()
+        except http_client.IncompleteRead as e:
+            # can't read the error text
+            # let's try some of it
+            data = e.partial
+        if self.e.headers.get('Content-Encoding') == 'gzip':
+            buf = StringIO(data)
             f = gzip.GzipFile(fileobj=buf)
             self.response_data = f.read()
         else:
-            self.response_data = self.e.fp.read()
+            self.response_data = data
 
     def __str__(self):
         fmt = ("." + self.format) if self.format else ""
@@ -99,6 +108,8 @@ def wrap_response(response, headers):
     if response_typ is bool:
         # HURF DURF MY NAME IS PYTHON AND I CAN'T SUBCLASS bool.
         response_typ = int
+    elif response_typ is str:
+        return response
 
     class WrappedTwitterResponse(response_typ, TwitterResponse):
         __doc__ = TwitterResponse.__doc__
@@ -108,7 +119,6 @@ def wrap_response(response, headers):
             TwitterResponse.__init__(self, headers)
         def __new__(cls, response, headers):
             return response_typ.__new__(cls, response)
-
 
     return WrappedTwitterResponse(response, headers)
 
@@ -171,6 +181,9 @@ class TwitterCall(object):
         if _id:
             kwargs['id'] = _id
 
+        # If an _timeout is specified in kwargs, use it
+        _timeout = kwargs.pop('_timeout', None)
+
         secure_str = ''
         if self.secure:
             secure_str = 's'
@@ -222,8 +235,8 @@ class Twitter(TwitterCall):
         t = Twitter(
             auth=OAuth(token, token_key, con_secret, con_secret_key)))
 
-        # Get the public timeline
-        t.statuses.public_timeline()
+        # Get your "home" timeline
+        t.statuses.home_timeline()
 
         # Get a particular friend's timeline
         t.statuses.friends_timeline(id="billybob")
@@ -247,16 +260,19 @@ class Twitter(TwitterCall):
         # into the middle of a call. You can also use replacement:
         t.user.list.members(user="tamtar", list="things-that-are-rad")
 
+        # An *optional* `_timeout` parameter can also be used for API
+        # calls which take much more time than normal or twitter stops
+        # responding for some reasone
+        t.users.lookup(
+            screen_name=','.join(A_LIST_OF_100_SCREEN_NAMES), \
+            _timeout=1)
+
+
 
     Searching Twitter::
 
-        twitter_search = Twitter(domain="search.twitter.com")
-
-        # Find the latest search trends
-        twitter_search.trends()
-
-        # Search for the latest News on #gaza
-        twitter_search.search(q="#gaza")
+        # Search for the latest tweets about #pycon
+        t.search.tweets(q="#pycon")
 
 
     Using the data returned
@@ -265,7 +281,7 @@ class Twitter(TwitterCall):
     Twitter API calls return decoded JSON. This is converted into
     a bunch of Python lists, dicts, ints, and strings. For example::
 
-        x = twitter.statuses.public_timeline()
+        x = twitter.statuses.home_timeline()
 
         # The first 'tweet' in the timeline
         x[0]
@@ -318,10 +334,7 @@ class Twitter(TwitterCall):
             raise ValueError("Unknown data format '%s'" %(format))
 
         if api_version is _DEFAULT:
-            if domain == 'api.twitter.com':
-                api_version = '1.1'
-            else:
-                api_version = None
+            api_version = '1.1'
 
         uriparts = ()
         if api_version:
