@@ -6,12 +6,18 @@ except ImportError:
     import urllib2 as urllib_request
     import urllib2 as urllib_error
 
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from io import BytesIO as StringIO
+
 from twitter.twitter_globals import POST_ACTIONS
 from twitter.auth import NoAuth
 from google.appengine.api import urlfetch
 from google.appengine.api.urlfetch_errors import DeadlineExceededError
 
 import re
+import gzip
 
 try:
     import json
@@ -38,7 +44,12 @@ class TwitterHTTPError(TwitterError):
         self.uri = uri
         self.format = format
         self.uriparts = uriparts
-        self.response_data = self.e.fp.read()
+        if self.e.headers['Content-Encoding'] == 'gzip':
+            buf = StringIO(self.e.fp.read())
+            f = gzip.GzipFile(fileobj=buf)
+            self.response_data = f.read()
+        else:
+            self.response_data = self.e.fp.read()
 
     def __str__(self):
         fmt = ("." + self.format) if self.format else ""
@@ -56,7 +67,7 @@ class TwitterResponse(object):
 
     `headers` gives you access to the response headers as an
     httplib.HTTPHeaders instance. You can do
-    `response.headers.getheader('h')` to retrieve a header.
+    `response.headers.get('h')` to retrieve a header.
     """
     def __init__(self, headers):
         self.headers = headers
@@ -66,14 +77,21 @@ class TwitterResponse(object):
         """
         Remaining requests in the current rate-limit.
         """
-        return int(self.headers.getheader('X-RateLimit-Remaining'))
+        return int(self.headers.get('X-Rate-Limit-Remaining', "0"))
+
+    @property
+    def rate_limit_limit(self):
+        """
+        The rate limit ceiling for that given request.
+        """
+        return int(self.headers.get('X-Rate-Limit-Limit', "0"))
 
     @property
     def rate_limit_reset(self):
         """
         Time in UTC epoch seconds when the rate limit will reset.
         """
-        return int(self.headers.getheader('X-RateLimit-Reset'))
+        return int(self.headers.get('X-Rate-Limit-Reset', "0"))
 
 
 def wrap_response(response, headers):
@@ -147,6 +165,12 @@ class TwitterCall(object):
         if id:
             uri += "/%s" %(id)
 
+        # If an _id kwarg is present, this is treated as id as a CGI
+        # param.
+        _id = kwargs.pop('_id', None)
+        if _id:
+            kwargs['id'] = _id
+
         secure_str = ''
         if self.secure:
             secure_str = 's'
@@ -156,7 +180,7 @@ class TwitterCall(object):
         uriBase = "http%s://%s/%s%s%s" %(
                     secure_str, self.domain, uri, dot, self.format)
 
-        headers = {}
+        headers = {'Accept-Encoding': 'gzip'}
         if self.auth:
             headers.update(self.auth.generate_headers())
             arg_data = self.auth.encode_params(uriBase, method, kwargs)
@@ -167,10 +191,10 @@ class TwitterCall(object):
                 body = arg_data.encode('utf8')
 
         #req = urllib_request.Request(uriBase, body, headers)
-        return self._handle_response(uriBase, headers, body , arg_data, method=method)
+        return self._handle_response(uriBase, headers, body, arg_data, method=method)
 
     def _handle_response(self, url, headers, body, arg_data, method="GET"):
-        response = urlfetch.fetch( url, headers=headers, method=method, payload=body )
+        response = urlfetch.fetch(url, headers=headers, method=method, payload=body)
         if response.status_code in [400,401, 404]:
             raise TwitterError("Bad response(%s) from %s \n%s", response.status_code, url, response.content)
         if "json" == self.format:
@@ -179,6 +203,7 @@ class TwitterCall(object):
         else:
             return wrap_response(
                 response.content, response.headers)
+
 
 class Twitter(TwitterCall):
     """
@@ -294,7 +319,7 @@ class Twitter(TwitterCall):
 
         if api_version is _DEFAULT:
             if domain == 'api.twitter.com':
-                api_version = '1'
+                api_version = '1.1'
             else:
                 api_version = None
 
