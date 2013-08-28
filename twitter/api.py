@@ -208,14 +208,23 @@ class TwitterCall(object):
 
     def _handle_response(self, url, headers, body, arg_data, method="GET"):
         response = urlfetch.fetch(url, headers=headers, method=method, payload=body)
-        if response.status_code in [400,401, 404]:
+        if response.status_code in [400, 401, 404]:
             raise TwitterError("Bad response(%s) from %s \n%s", response.status_code, url, response.content)
+
+        if response.headers['Content-Type'] in ['image/jpg', 'image/png']:
+            return response
+        data = response.content
+        if response.headers['Content-Encoding'] == 'gzip':
+            # Handle gzip decompression
+            buf = StringIO(data)
+            f = gzip.GzipFile(fileobj=buf)
+            data = f.read()
         if "json" == self.format:
-            res = json.loads(response.content)
+            res = json.loads(data.decode('utf8'))
             return wrap_response(res, response.headers)
         else:
             return wrap_response(
-                response.content, response.headers)
+                data.decode('utf8'), response.headers)
 
 
 class Twitter(TwitterCall):
