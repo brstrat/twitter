@@ -68,6 +68,7 @@ class TwitterHTTPError(TwitterError):
                 self.e.code, self.uri, fmt, self.uriparts,
                 self.response_data))
 
+
 class TwitterResponse(object):
     """
     Response from a twitter request. Behaves like a list or a string
@@ -105,23 +106,23 @@ class TwitterResponse(object):
 
 def wrap_response(response, headers):
     response_typ = type(response)
-    if response_typ is bool:
-        # HURF DURF MY NAME IS PYTHON AND I CAN'T SUBCLASS bool.
-        response_typ = int
-    elif response_typ is str:
-        return response
+    if response_typ is dict:
+        res = TwitterDictResponse(response)
+        res.headers = headers
+    elif response_typ is list:
+        res = TwitterListResponse(response)
+        res.headers = headers
+    else:
+        res = response
+    return res
 
-    class WrappedTwitterResponse(response_typ, TwitterResponse):
-        __doc__ = TwitterResponse.__doc__
 
-        def __init__(self, response, headers):
-            response_typ.__init__(self, response)
-            TwitterResponse.__init__(self, headers)
-        def __new__(cls, response, headers):
-            return response_typ.__new__(cls, response)
+class TwitterDictResponse(dict, TwitterResponse):
+    pass
 
-    return WrappedTwitterResponse(response, headers)
 
+class TwitterListResponse(list, TwitterResponse):
+    pass
 
 
 class TwitterCall(object):
@@ -202,7 +203,6 @@ class TwitterCall(object):
                 body = None
             else:
                 body = arg_data.encode('utf8')
-
         #req = urllib_request.Request(uriBase, body, headers)
         return self._handle_response(uriBase, headers, body, arg_data, method=method)
 
